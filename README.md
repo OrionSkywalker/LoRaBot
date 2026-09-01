@@ -1,316 +1,361 @@
-# ACK News Bot 📡
+# LoRaBot
 
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support%20This%20Project-yellow)](https://buymeacoffee.com/acknewsbot)
+LoRaBot is a private-channel conversational assistant for Meshtastic. A Raspberry Pi runs a
+small local Ollama model, retrieves selected RSS/Atom feeds, and performs web searches when a
+question needs current information. A USB-connected Heltec WiFi LoRa 32 V4 is the radio.
 
-A free, locally-hosted AI news service for Meshtastic mesh networks. Users send a simple command from any node in range of the bot on the mesh and receive AI-summarized local and national news headlines, NOAA weather alerts, and full story details — all privately delivered with no internet-connected apps required just the bot online and connected to the mesh.
+This project began as a fork of
+[tungstenec-max/ack-news-bot](https://github.com/tungstenec-max/ack-news-bot) and retains its
+useful curated-news concept while replacing the single script with a configurable service.
 
----
+## What it does
 
-## Features
+- Conversational questions use a local Ollama model and short per-node chat history.
+- `news updates` summarizes stories from feeds you select in `sources.json`.
+- `news about space` ranks the same curated feeds for a requested topic.
+- `search <question>` searches the web and grounds the answer in result snippets.
+- Questions containing words such as `current`, `latest`, or `today` automatically use search.
+- `sources` returns links from the most recent news briefing or search.
+- `forget` clears that node's in-memory conversation and stored links.
+- Every request is accepted only on the configured Meshtastic channel index.
+- Replies are addressed directly to the requesting node on that same channel.
 
-- 📰 **Local + National News** — 2 local stories and 1 NPR national story per request
-- 🤖 **AI Summaries** — Local Ollama AI summarizes headlines to mesh-friendly length
-- ⚠️ **NOAA Alerts** — Live weather and emergency alerts by zip code
-- 📖 **Story Expansion** — Reply 1, 2, or 3 to get the full story and source link
-- 🔒 **Private Replies** — Responses go only to the requesting node, not the public channel
-- 🚦 **Channel Throttling** — Bot waits for channel quiet before sending, respects other users
-- ⏱️ **Rate Limiting** — Max 5 requests per node per hour to prevent abuse
-- 💰 **Zero Monthly Cost** — All free APIs, local AI, no subscriptions
+The bot does not give the model unrestricted browser control. Web retrieval supplies a small set
+of search snippets as untrusted evidence. This is faster on a Pi, reduces prompt-injection risk,
+and makes source handling explicit.
 
----
+## Target hardware
 
-## Hardware Requirements
+- Raspberry Pi 4 with 4 GB RAM
+- Raspberry Pi OS Lite, 64-bit (Bookworm or newer)
+- Heltec WiFi LoRa 32 V4, 902-928 MHz hardware
+- Meshtastic radio firmware 2.7.26
+- Data-capable USB-A to USB-C cable
+- Correct 915 MHz LoRa antenna
+- 32 GB or larger high-endurance microSD card recommended
 
-| Component | Recommended | Minimum |
-|-----------|-------------|---------|
-| Single Board Computer | Raspberry Pi 5 8GB | Raspberry Pi 4 4GB |
-| Storage | 32GB microSD | 16GB microSD |
-| Meshtastic Node | Any USB-C node | Any WiFi/TCP node |
-| Connection | USB serial (recommended) | WiFi/TCP |
+Always attach the LoRa antenna before allowing the Heltec to transmit. The V4 does not use the
+V3's CP2102 USB-UART bridge, so Linux commonly exposes it as `/dev/ttyACM0`, not
+`/dev/ttyUSB0`. LoRaBot supports automatic detection and stable `/dev/serial/by-id/...` paths.
 
-> ⚠️ The Raspberry Pi Zero 2W is **not supported** — it has insufficient RAM (512MB) to run Ollama.
+## How requests flow
 
----
-
-## How It Works
-
-```
-User sends:  news 80537
-Bot replies: ACK News! Got your request for 80537, working on it...
-Bot replies: ACK NEWS - Loveland, CO
-             1. [Local] Story one summary
-             2. [Local] Story two summary
-             3. [NPR] National story summary
-             ⚠️ 2 active NOAA alert(s) - reply 'alerts' for details
-             Reply 1-3 expand | 'alerts' 4 NOAA | exp 10min
-
-User sends:  1
-Bot replies: Story 1: Full headline here
-             Full description of the story...
-             Source: https://example.com/story
-
-User sends:  alerts
-Bot replies: ⚠️ NOAA ALERTS:
-             Moderate: Winter Storm Warning - Heavy snow expected...
+```text
+Private Meshtastic channel
+        |
+        +-- "news ..." --------> selected RSS/Atom feeds ----+
+        |                                                  |
+        +-- "search ..." ------> DDGS web search ----------+--> Ollama --> short direct reply
+        |                                                  |
+        +-- ordinary message -------------------------------+
 ```
 
----
+## Raspberry Pi and Heltec setup
 
-## Commands
+### 1. Prepare the Pi
 
-| Command | Description |
-|---------|-------------|
-| `news 12345` | Get local + national news for zip code |
-| `news12345` | Same as above (space optional) |
-| `1` `2` `3` | Expand a story from your last news request |
-| `alerts` | Get full NOAA alert details from your last request |
-| `news help` | Show available commands |
+Use Raspberry Pi Imager to install **Raspberry Pi OS Lite (64-bit)**. In Imager settings, create
+your user, configure Wi-Fi, set the hostname, and enable SSH. After the first boot:
 
----
+```bash
+sudo apt update
+sudo apt full-upgrade -y
+sudo apt install -y curl git python3-venv
+sudo reboot
+```
 
-## Installation
+### 2. Flash the Heltec V4
 
-### Step 1 — Prepare Raspberry Pi
+1. Attach the 915 MHz antenna.
+2. Connect the Heltec to a desktop computer with a data-capable USB cable.
+3. Open the [Meshtastic Web Flasher](https://flasher.meshtastic.org/).
+4. Select **Heltec LoRa32 V4** and install Meshtastic firmware **2.7.26**.
+5. Reconnect the Heltec to a USB-A port on the Pi.
 
-1. Download and install [Raspberry Pi Imager](https://www.raspberrypi.com/software/)
-2. Flash **Raspberry Pi OS 64-bit** to your microSD card
-3. In Imager settings, configure your WiFi credentials and enable SSH
-4. Boot your Pi and SSH in (default hostname: `raspberrypi.local`)
+The Heltec's `2.7.26` number is the embedded radio firmware version. LoRaBot separately installs
+the Meshtastic Python client library (verified with Python client `2.7.11`); the two projects have
+independent version numbers.
 
-### Step 2 — Install Ollama
+Confirm that Linux sees it:
+
+```bash
+ls -l /dev/ttyACM* /dev/serial/by-id/ 2>/dev/null
+```
+
+Prefer the `/dev/serial/by-id/...` name in `config.ini`. It remains stable if USB device numbering
+changes. If that directory is absent, leave `serial_port = auto` initially.
+
+### 3. Install LoRaBot
+
+```bash
+sudo git clone https://github.com/OrionSkywalker/LoRaBot.git /opt/lorabot
+sudo python3 -m venv /opt/lorabot/.venv
+sudo /opt/lorabot/.venv/bin/python -m pip install --upgrade pip
+sudo /opt/lorabot/.venv/bin/python -m pip install /opt/lorabot
+```
+
+Create the service account and configuration:
+
+```bash
+sudo useradd --system --create-home --home-dir /var/lib/lorabot \
+  --shell /usr/sbin/nologin --groups dialout lorabot
+sudo install -d -o root -g lorabot -m 0750 /etc/lorabot
+sudo install -o root -g lorabot -m 0640 /opt/lorabot/config.example.ini \
+  /etc/lorabot/config.ini
+sudo install -o root -g lorabot -m 0640 /opt/lorabot/sources.example.json \
+  /etc/lorabot/sources.json
+```
+
+### 4. Configure the Heltec for US 915 MHz
+
+Replace the example port below with the path found in step 2:
+
+```bash
+sudo /opt/lorabot/.venv/bin/meshtastic \
+  --port /dev/serial/by-id/usb-EXAMPLE \
+  --set lora.region US
+```
+
+The region must be set before the node will transmit. Leave the modem preset at `LONG_FAST`
+unless every node in your mesh is intentionally using another preset.
+
+### 5. Create a private secondary channel
+
+Keep the ordinary primary channel at index 0. Add a dedicated private channel at index 1:
+
+```bash
+sudo /opt/lorabot/.venv/bin/meshtastic \
+  --port /dev/serial/by-id/usb-EXAMPLE \
+  --ch-add LoRaBot
+
+sudo /opt/lorabot/.venv/bin/meshtastic \
+  --port /dev/serial/by-id/usb-EXAMPLE \
+  --ch-set psk random \
+  --ch-set uplink_enabled false \
+  --ch-set downlink_enabled false \
+  --ch-index 1
+```
+
+Generate the channel URL/QR code:
+
+```bash
+sudo /opt/lorabot/.venv/bin/meshtastic \
+  --port /dev/serial/by-id/usb-EXAMPLE \
+  --qr-all
+```
+
+Import that URL or QR code into the Meshtastic client used by your other radio. Treat it as a
+password: anyone with the channel URL can read the channel. Do not commit it to this repository.
+The random PSK is AES-256; the default and `simple` keys are publicly known and are not private.
+
+If index 1 was already occupied, use the next consecutive secondary index and set the same index
+in `/etc/lorabot/config.ini`.
+
+### 6. Install Ollama
+
+Install Ollama's ARM64 build and enable its service:
 
 ```bash
 curl -fsSL https://ollama.com/install.sh | sh
+sudo systemctl enable --now ollama
 ollama pull llama3.2:3b
 ```
 
-### Step 3 — Install Dependencies
+The default quantized `llama3.2:3b` download is about 2 GB. It fits on a 4 GB Pi but responses can
+take tens of seconds, especially after the model has been unloaded. Raspberry Pi OS Lite, a 2048
+token context, and short output limits are already reflected in the example configuration.
+
+If memory pressure or latency is unacceptable, use the smaller model:
 
 ```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt install python3-pip python3-venv -y
+ollama pull llama3.2:1b
+sudo sed -i 's/model = llama3.2:3b/model = llama3.2:1b/' /etc/lorabot/config.ini
 ```
 
-### Step 4 — Set Up the Bot
+### 7. Select feeds and interests
+
+Edit the private configuration copies, not the example files in Git:
 
 ```bash
-mkdir ~/acknews && cd ~/acknews
-python3 -m venv venv
-source venv/bin/activate
-pip install meshtastic requests
+sudoedit /etc/lorabot/config.ini
+sudoedit /etc/lorabot/sources.json
 ```
 
-### Step 5 — Deploy Files
+In `config.ini`:
 
-Copy `acknews.py` and `config.ini` to `~/acknews/` using WinSCP or SCP.
+- Set `serial_port` to the stable `/dev/serial/by-id/...` path, or leave it as `auto`.
+- Keep `channel_index = 1` if the private channel created above is index 1.
+- Add comma-separated Meshtastic node IDs to `allowed_node_ids` for an additional allowlist.
+- Set `wake_word = lorabot` if the bot should ignore private-channel messages without that prefix.
+- Set `require_direct_message = true` only if you want to reject channel broadcasts completely.
+- Tune response and radio limits conservatively; each additional chunk consumes mesh airtime.
 
-### Step 6 — Configure
+In `sources.json`, replace or extend the example feeds:
 
-Edit `config.ini` with your settings:
-
-```ini
-[meshtastic]
-serial_port = /dev/ttyUSB0        # USB connection (recommended)
-# serial_port = 192.168.0.215     # WiFi/TCP alternative
-
-[newsapi]
-key = your_newsapi_key_here       # Optional, not required for RSS mode
-
-[bot]
-ollama_model = llama3.2:3b
-num_stories = 3
-message_delay = 2
-story_expire = 600
-rate_limit_max = 5
-rate_limit_window = 3600
-max_queue_size = 20
-throttle_delay = 3
-channel_quiet_window = 10
-```
-
-### Step 7 — Connect Meshtastic Node
-
-**Recommended: USB Serial**
-1. Plug USB-C cable from Meshtastic node into Pi's USB-A port
-2. Verify connection: `ls /dev/ttyUSB*` — should show `/dev/ttyUSB0`
-
-**Alternative: WiFi/TCP**
-1. Set a static IP for your node in your router's DHCP settings
-2. Update `config.ini` with the node's IP address
-
-### Step 8 — Install as System Service
-
-```bash
-sudo nano /etc/systemd/system/acknews.service
-```
-
-Paste this content:
-
-```ini
-[Unit]
-Description=ACK News Bot
-After=network.target
-
-[Service]
-Type=simple
-User=pi
-WorkingDirectory=/home/pi/acknews
-ExecStart=/home/pi/acknews/venv/bin/python3 /home/pi/acknews/acknews.py
-Restart=on-failure
-RestartSec=30
-StartLimitIntervalSec=0
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start:
-
-```bash
-sudo systemctl enable acknews
-sudo systemctl start acknews
-sudo systemctl status acknews
-```
-
----
-
-## Adding Local News Sources
-
-The bot uses RSS feeds mapped by US state. To add or change feeds for your area, edit the `STATE_RSS` dictionary in `acknews.py`:
-
-```python
-STATE_RSS = {
-    "CO": [
-        "https://kdvr.com/feed/",
-        "https://www.denverpost.com/feed/",
-        "https://www.9news.com/feeds/syndication/rss/news",
-        "https://coloradoan.com/arcio/rss/",
-    ],
-    # Add your state here
-    "XX": [
-        "https://your-local-news-site.com/feed/",
-    ],
+```json
+{
+  "interests": ["space", "technology", "local government"],
+  "feeds": [
+    {
+      "name": "Example Local News",
+      "url": "https://example.org/news.rss",
+      "topics": ["local government", "weather"]
+    }
+  ]
 }
 ```
 
-Most local TV stations and newspapers publish free RSS feeds. Search for `[station name] RSS feed` to find them.
+Only RSS and Atom feeds you list are used by `news ...` requests. General web search is separate
+and can be disabled with `enabled = false` in the `[web]` section.
 
----
+### 8. Validate without the radio
 
-## ARES/RACES Integration Guide
+Check the configuration, sources file, and Ollama connection:
 
-ACK News Bot is designed to work alongside amateur radio emergency communication groups. Here is how to integrate it with your local ARES/RACES organization.
+```bash
+sudo -u lorabot /opt/lorabot/.venv/bin/lorabot \
+  --config /etc/lorabot/config.ini --check
+```
 
-### What ARES/RACES Operators Can Do
+Test a local-model answer:
 
-- Use the bot as a **public information resource** during activations
-- Direct affected community members to use `news ZIPCODE` for local updates
-- Use `alerts ZIPCODE` for real-time NOAA emergency alert status
-- Supplement traditional HF/VHF nets with mesh-based information delivery
+```bash
+sudo -u lorabot /opt/lorabot/.venv/bin/lorabot \
+  --config /etc/lorabot/config.ini --ask "Explain LoRa in two sentences"
+```
 
-### Contacting Your Local ARES/RACES Group
+Test retrieval before using radio airtime:
 
-1. Find your local ARRL section at **arrl.org/sections**
-2. Contact your **Section Emergency Coordinator (SEC)** or **Emergency Coordinator (EC)**
-3. Introduce the mesh network and ACK News Bot capabilities
-4. Propose adding the bot node to your local EmComm plan
+```bash
+sudo -u lorabot /opt/lorabot/.venv/bin/lorabot \
+  --config /etc/lorabot/config.ini --ask "news updates"
 
-### Suggested Pitch to ARES/RACES
+sudo -u lorabot /opt/lorabot/.venv/bin/lorabot \
+  --config /etc/lorabot/config.ini --ask "search current Meshtastic release"
+```
 
-*"We have a Meshtastic mesh network covering [X] nodes in [your area]. ACK News Bot provides on-demand local news and NOAA emergency alerts to any node on the mesh — no internet, no cell service required once the Pi has its data. During an activation this gives served agencies and community members a self-service information resource that doesn't tie up voice nets."*
+### 9. Start at boot
 
-### Admin Broadcast Command (Coming Soon)
+```bash
+sudo install -o root -g root -m 0644 /opt/lorabot/systemd/lorabot.service \
+  /etc/systemd/system/lorabot.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now lorabot
+sudo systemctl status lorabot --no-pager
+```
 
-A future update will allow trusted ARES/RACES operators to push urgent announcements to the entire mesh channel. Trusted operator node IDs will be stored in `config.ini`. This will enable:
+Follow logs while sending a test message on the private channel:
 
-- Net control stations to push activation notices
-- Emergency managers to broadcast evacuation or shelter information
-- Public information officers to distribute official updates
+```bash
+sudo journalctl -u lorabot -f
+```
 
-### Contacting Local Emergency Management
+Try these messages from your other Meshtastic node:
 
-For Larimer County / Loveland CO area:
-- **Larimer County Emergency Management** — larimerco.org/emergency-management
-- **Loveland Fire Rescue Authority** — cityofloveland.org/lfra
-- **City of Loveland Emergency Management** — cityofloveland.org
+```text
+help
+news updates
+news about space
+Why does LoRa travel farther than Wi-Fi?
+search what is the current space weather forecast?
+sources
+forget
+```
 
-For other areas search: `[your county] emergency management office`
+## Privacy and security behavior
 
----
+- Channel privacy comes from the custom random PSK configured on both radios.
+- LoRaBot ignores packets arriving on any other channel index.
+- Replies use `destinationId`, so they are addressed to the requester rather than broadcast.
+- Input broadcasts on the private channel are accepted by default because this is intended to be
+  a dedicated two-party channel. Set `require_direct_message = true` to change that.
+- Channel uplink/downlink to MQTT is disabled in the setup commands.
+- Conversation state is held only in RAM and is keyed by node ID; it disappears on restart.
+- Search queries and feed requests leave the Pi over the internet. Ordinary local-model prompts do
+  not, unless they contain an automatic freshness term and web search is enabled.
+- Search snippets and feed content are marked untrusted in the model prompt. This reduces but does
+  not eliminate the risks of malicious retrieved text or model mistakes.
 
-## Cost Analysis
+Meshtastic's encrypted channels protect content from people without the key, but radio metadata
+and traffic patterns can still be observable. Do not use a general-purpose language model as the
+sole authority for medical, legal, emergency, or safety-critical decisions.
 
-| Item | Cost |
-|------|------|
-| Raspberry Pi 5 8GB | ~$80 |
-| microSD card 32GB | ~$10 |
-| Power supply | ~$12 |
-| USB-C cable | ~$0 (you have one) |
-| **Total hardware** | **~$102** |
-| Monthly operating cost | **$0.00** |
-| Electricity (Pi 5 idle) | ~$2-4/year |
+## Updating
 
----
+```bash
+sudo systemctl stop lorabot
+sudo git -C /opt/lorabot pull --ff-only
+sudo /opt/lorabot/.venv/bin/python -m pip install /opt/lorabot
+sudo systemctl start lorabot
+```
+
+Configuration under `/etc/lorabot` is not overwritten by an update.
 
 ## Troubleshooting
 
-**Bot not connecting to node:**
+**No serial device appears**
+
 ```bash
-ls /dev/ttyUSB*        # Check USB device is visible
-ping 192.168.0.x       # Check WiFi/TCP node is reachable
+dmesg --follow
+lsusb
+ls -l /dev/ttyACM* /dev/serial/by-id/ 2>/dev/null
 ```
 
-**No news results:**
-- Check your RSS feeds are still valid
-- Some feeds change URLs over time — search for updated feed URLs
+Try another data-capable cable and USB-A port. The V4's USB behavior differs from the V3, so do
+not assume `/dev/ttyUSB0`.
 
-**Slow responses:**
-- Normal on first request after idle (Ollama loads model into memory)
-- Adjust `throttle_delay` in `config.ini` if needed
-- Consider upgrading to Pi 5 if using Pi 4
+**Permission denied opening the serial port**
 
-**Service not starting:**
 ```bash
-sudo journalctl -u acknews -n 20 --no-pager
+id lorabot
+getent group dialout
+sudo usermod -aG dialout lorabot
+sudo systemctl restart lorabot
 ```
 
----
+**Ollama is unavailable or slow**
 
-## Roadmap
+```bash
+systemctl status ollama --no-pager
+journalctl -u ollama -n 100 --no-pager
+free -h
+ollama list
+```
 
-- [ ] Admin broadcast command for ARES/RACES and emergency management
-- [ ] Web dashboard for monitoring requests and bot health
-- [ ] Support for additional Meshtastic channels
-- [ ] Configurable RSS feeds via config.ini (no code editing required)
-- [ ] Multi-language support
+Use `llama3.2:1b` if the 3B model is too slow or the Pi is swapping heavily.
 
----
+**Bot hears public-channel messages or hears nothing**
 
-## Support This Project
+Confirm the actual private channel index with:
 
-If ACK News Bot is useful to your mesh community, consider buying us a coffee! ☕
+```bash
+sudo /opt/lorabot/.venv/bin/meshtastic \
+  --port /dev/serial/by-id/usb-EXAMPLE --info
+```
 
-👉 **[buymeacoffee.com/acknewsbot](https://buymeacoffee.com/acknewsbot)**
+The reported channel index and `config.ini` must match. The bot intentionally discards every
+other index.
 
-Every coffee helps keep the project going and supports new features!
+**Web search fails intermittently**
 
----
+DDGS is a free metasearch library and upstream search providers can rate-limit or change behavior.
+The bot reports the failure rather than silently presenting model knowledge as current. Retry
+later or disable web search while keeping curated feeds and local conversation.
+
+## Development
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e '.[dev]'
+pytest -q
+ruff check .
+ruff format --check .
+```
+
+The test suite covers intent routing, per-node history, source recall, configuration validation,
+Atom parsing, and UTF-8-safe mesh message splitting.
 
 ## License
 
-MIT License — free to use, modify, and share.
-
----
-
-## Credits
-
-Built with:
-- [Meshtastic](https://meshtastic.org) — mesh networking platform
-- [Ollama](https://ollama.com) — local AI inference
-- [api.weather.gov](https://api.weather.gov) — free NOAA weather alerts
-- [NPR News RSS](https://npr.org) — national news feed
-- Local RSS feeds from regional news outlets
-
----
-
-*Built for the Meshtastic community. Stay connected when it counts.* 📡
+MIT. See [LICENSE](LICENSE).

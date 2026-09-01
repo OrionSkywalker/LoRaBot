@@ -1,0 +1,25 @@
+{
+  "interests": [
+    "science",
+    "technology",
+    "space",
+    "United States"
+  ],
+  "feeds": [
+    {
+      "name": "NPR News",
+      "url": "https://feeds.npr.org/1001/rss.xml",
+      "topics": ["United States", "world", "general"]
+    },
+    {
+      "name": "NPR Technology",
+      "url": "https://feeds.npr.org/1019/rss.xml",
+      "topics": ["technology"]
+    },
+    {
+      "name": "NASA Breaking News",
+      "url": "https://www.nasa.gov/news-release/feed/",
+      "topics": ["NASA", "space", "science"]
+    }
+  ]
+}
