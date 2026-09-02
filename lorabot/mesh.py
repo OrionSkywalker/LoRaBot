@@ -64,6 +64,20 @@ class MeshBot:
     def _is_broadcast(packet: dict) -> bool:
         return packet.get("toId") == "^all" or packet.get("to") == BROADCAST_NUM
 
+    @staticmethod
+    def _is_direct_to_local(packet: dict, interface) -> bool:
+        local_node = getattr(getattr(interface, "localNode", None), "nodeNum", None)
+        if local_node is None:
+            return False
+        destination = packet.get("to")
+        try:
+            if destination is not None and int(destination) == int(local_node):
+                return True
+        except (TypeError, ValueError):
+            pass
+        destination_id = str(packet.get("toId", "")).strip().lower()
+        return destination_id == f"!{int(local_node):08x}"
+
     def _strip_wake_word(self, text: str) -> str | None:
         wake_word = self.settings.meshtastic.wake_word
         if not wake_word:
@@ -75,12 +89,14 @@ class MeshBot:
     def on_receive(self, packet: dict, interface) -> None:
         try:
             channel = int(packet.get("channel", 0))
-            if channel != self.settings.meshtastic.channel_index:
+            direct_to_local = self._is_direct_to_local(packet, interface)
+            secure_direct = direct_to_local and packet.get("pkiEncrypted") is True
+            if channel != self.settings.meshtastic.channel_index and not secure_direct:
                 return
             local_node = getattr(getattr(interface, "localNode", None), "nodeNum", None)
             if local_node is not None and packet.get("from") == local_node:
                 return
-            if self.settings.meshtastic.require_direct_message and self._is_broadcast(packet):
+            if self.settings.meshtastic.require_direct_message and not direct_to_local:
                 return
 
             node_id = self._node_id(packet)

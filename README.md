@@ -17,7 +17,8 @@ useful curated-news concept while replacing the single script with a configurabl
 - Questions containing words such as `current`, `latest`, or `today` automatically use search.
 - `sources` returns links from the most recent news briefing or search.
 - `forget` clears that node's in-memory conversation and stored links.
-- Every request is accepted only on the configured Meshtastic channel index.
+- Requests are accepted on the configured Meshtastic channel and in authenticated direct-message
+  conversations addressed to the bot.
 - Replies are addressed directly to the requesting node on that same channel.
 
 The bot does not give the model unrestricted browser control. Web retrieval supplies a small set
@@ -265,7 +266,9 @@ forget
 ## Privacy and security behavior
 
 - Channel privacy comes from the custom random PSK configured on both radios.
-- LoRaBot ignores packets arriving on any other channel index.
+- LoRaBot accepts traffic on the configured private channel. It also accepts PKI-encrypted direct
+  messages addressed to its node, allowing replies in the app's DM thread to continue the same
+  conversation. Other channel indexes and unauthenticated legacy unicasts are ignored.
 - Replies use `destinationId`, so they are addressed to the requester rather than broadcast.
 - Input broadcasts on the private channel are accepted by default because this is intended to be
   a dedicated two-party channel. Set `require_direct_message = true` to change that.
@@ -348,8 +351,8 @@ sudo /opt/lorabot/.venv/bin/meshtastic \
   --port /dev/serial/by-id/usb-EXAMPLE --info
 ```
 
-The reported channel index and `config.ini` must match. The bot intentionally discards every
-other index.
+The reported channel index and `config.ini` must match for channel broadcasts. Authenticated PKI
+direct messages use Meshtastic's DM path and are accepted separately.
 
 **Web search fails intermittently**
 

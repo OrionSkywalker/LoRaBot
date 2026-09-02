@@ -64,6 +64,67 @@ def test_private_channel_request_is_queued_and_acknowledged_directly():
     assert interface.sent[0][1]["channelIndex"] == 1
 
 
+def test_pki_direct_message_continues_conversation_on_dm_channel():
+    bot = MeshBot(settings(), FakeAssistant())
+    interface = SelfAwareInterface()
+    bot.interface = interface
+    bot.on_receive(
+        {
+            "channel": 0,
+            "from": 456,
+            "fromId": "!000001c8",
+            "to": 123,
+            "toId": "!0000007b",
+            "pkiEncrypted": True,
+            "decoded": {"text": "follow-up in the DM thread"},
+        },
+        interface,
+    )
+    request = bot.requests.get_nowait()
+    assert request.node_id == "!000001c8"
+    assert request.channel_index == 0
+    assert interface.sent[0][1]["destinationId"] == "!000001c8"
+    assert interface.sent[0][1]["channelIndex"] == 0
+
+
+def test_non_pki_direct_message_on_other_channel_is_ignored():
+    bot = MeshBot(settings(), FakeAssistant())
+    interface = SelfAwareInterface()
+    bot.interface = interface
+    bot.on_receive(
+        {
+            "channel": 0,
+            "from": 456,
+            "fromId": "!000001c8",
+            "to": 123,
+            "pkiEncrypted": False,
+            "decoded": {"text": "untrusted legacy direct message"},
+        },
+        interface,
+    )
+    assert bot.requests.empty()
+    assert interface.sent == []
+
+
+def test_pki_direct_message_for_another_node_is_ignored():
+    bot = MeshBot(settings(), FakeAssistant())
+    interface = SelfAwareInterface()
+    bot.interface = interface
+    bot.on_receive(
+        {
+            "channel": 0,
+            "from": 456,
+            "fromId": "!000001c8",
+            "to": 999,
+            "pkiEncrypted": True,
+            "decoded": {"text": "not for this bot"},
+        },
+        interface,
+    )
+    assert bot.requests.empty()
+    assert interface.sent == []
+
+
 def test_direct_only_mode_rejects_channel_broadcast():
     bot = MeshBot(settings(require_direct=True), FakeAssistant())
     interface = FakeInterface()
@@ -78,6 +139,24 @@ def test_direct_only_mode_rejects_channel_broadcast():
         interface,
     )
     assert bot.requests.empty()
+
+
+def test_direct_only_mode_accepts_pki_direct_message():
+    bot = MeshBot(settings(require_direct=True), FakeAssistant())
+    interface = SelfAwareInterface()
+    bot.interface = interface
+    bot.on_receive(
+        {
+            "channel": 0,
+            "from": 456,
+            "fromId": "!000001c8",
+            "to": 123,
+            "pkiEncrypted": True,
+            "decoded": {"text": "hello directly"},
+        },
+        interface,
+    )
+    assert bot.requests.get_nowait().node_id == "!000001c8"
 
 
 def test_message_from_connected_radio_is_ignored():
