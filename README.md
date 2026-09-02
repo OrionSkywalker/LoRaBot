@@ -306,6 +306,21 @@ not assume `/dev/ttyUSB0`.
 
 **Permission denied opening the serial port**
 
+For the shortest path, let the repository helper discover the stable USB name, install a
+persistent permission rule for that exact device, update `serial_port`, and test the radio:
+
+```bash
+cd /opt/lorabot
+sudo git pull --ff-only
+sudo bash scripts/setup_serial.sh
+```
+
+The helper stops LoRaBot while testing so the service and diagnostic command do not compete for
+the port. If several USB serial devices are attached, it prints them and asks you to rerun it with
+`--device /dev/serial/by-id/...`. It does not modify channels, PSKs, or `sources.json`.
+
+To inspect or repair the permissions manually instead:
+
 ```bash
 id lorabot
 getent group dialout
